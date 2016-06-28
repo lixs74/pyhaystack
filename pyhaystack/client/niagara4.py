@@ -1,6 +1,7 @@
     # -*- coding: utf-8 -*-
 """
-Created on Tue Nov 18 13:44:20 2014
+Work in progress
+Implemntation details : http://www.project-haystack.org/forum/topic/403
 
 @author: CTremblay
 """
