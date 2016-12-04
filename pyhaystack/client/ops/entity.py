@@ -39,11 +39,23 @@ class EntityRetrieveOperation(state.HaystackOperation):
         try:
             # See if the read succeeded.
             grid = operation.result
+            self._log.debug('Received grid: %s', grid)
 
             # Iterate over each row:
             for row in grid:
+                # Ignore rows that don't specify an ID.
+                if 'id' not in row:
+                    continue
+
                 row = row.copy()
-                entity_id = row.pop('id').name  # Should be a Ref
+                entity_ref = row.pop('id')
+
+                # This entity does not exist
+                if entity_ref is None:
+                    continue
+
+                entity_id = entity_ref.name
+
                 try:
                     entity = self._entities[entity_id]
                     entity._update_tags(row)
@@ -80,25 +92,30 @@ class EntityRetrieveOperation(state.HaystackOperation):
 class GetEntityOperation(EntityRetrieveOperation):
     """
     Operation for retrieving entity instances by ID.  This operation peforms
-    the following steps:
+    the following steps::
+    
+        If refresh_all is False:                  
+        # State: init
+            For each entity_id in entity_ids:
+                If entity_id exists in cache:
+                    Retrieve and store entity from cache.
+                    Add entity_id to list got_ids.
+            For each entity_id in got_ids:
+                Discard entity_id from entity_ids.
+        If entity_ids is not empty:               
+        # State: read
+            Perform a low-level read of the IDs.
+            For each row returned in grid:
+                If entity is not in cache:
+                    Create new Entity instances for each row returned.
+                Else:
+                    Update existing Entity instance with new row data.
+            Add the new entity instances to cache and store.
+        Return the stored entities.                      
+        # State: done
 
-    - If refresh_all is False:                  # State: init
-      - For each entity_id in entity_ids:
-        - If entity_id exists in cache:
-          - Retrieve and store entity from cache.
-          - Add entity_id to list got_ids.
-      - For each entity_id in got_ids:
-        - Discard entity_id from entity_ids.
-    - If entity_ids is not empty:               # State: read
-      - Perform a low-level read of the IDs.
-      - For each row returned in grid:
-        - If entity is not in cache:
-          - Create new Entity instances for each row returned.
-        - Else:
-          - Update existing Entity instance with new row data.
-      - Add the new entity instances to cache and store.
-    - Return the stored entities.               # State: done
     """
+    
 
     def __init__(self, session, entity_ids, refresh_all, single):
         """
@@ -109,6 +126,7 @@ class GetEntityOperation(EntityRetrieveOperation):
         :param refresh_all: Refresh all entities, ignore existing content.
         """
 
+        self._log = session._log.getChild('get_entity')
         super(GetEntityOperation, self).__init__(session, single)
         self._entity_ids = set(map(lambda r : r.name \
                 if isinstance(r, hszinc.Ref) else r, entity_ids))
@@ -172,16 +190,18 @@ class GetEntityOperation(EntityRetrieveOperation):
 class FindEntityOperation(EntityRetrieveOperation):
     """
     Operation for retrieving entity instances by filter.
-    This operation peforms the following steps:
+    This operation peforms the following steps::
 
-    - Issue a read instruction with the given filter:
-    - For each row returned in grid:
-        - If entity is not in cache:
-          - Create new Entity instances for each row returned.
-        - Else:
-          - Update existing Entity instance with new row data.
-      - Add the new entity instances to cache and store.
-    - Return the stored entities.               # State: done
+        Issue a read instruction with the given filter:
+            For each row returned in grid:
+                If entity is not in cache:
+                    Create new Entity instances for each row returned.
+                Else:
+                    Update existing Entity instance with new row data.
+                Add the new entity instances to cache and store.
+            Return the stored entities. 
+            # State: done              
+            
     """
 
     def __init__(self, session, filter_expr, limit, single):
@@ -193,6 +213,7 @@ class FindEntityOperation(EntityRetrieveOperation):
         :param limit: Maximum number of entities to fetch.
         """
 
+        self._log = session._log.getChild('find_entity')
         super(FindEntityOperation, self).__init__(session, single)
         self._filter_expr = filter_expr
         self._limit = limit
