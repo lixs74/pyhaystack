@@ -10,7 +10,7 @@ import re
 
 from ....util import state
 from ....util.asyncexc import AsynchronousException
-from ...http.auth import BasicAuthenticationCredentials
+from ...http.auth import DigestAuthenticationCredentials
 from ...http.exceptions import HTTPStatusError
 
 class NiagaraAXAuthenticateOperation(state.HaystackOperation):
@@ -52,7 +52,7 @@ class NiagaraAXAuthenticateOperation(state.HaystackOperation):
         self._retries = retries
         self._session = session
         self._cookies = {}
-        self._auth = BasicAuthenticationCredentials(session._username,
+        self._auth = DigestAuthenticationCredentials(session._username,
                                                     session._password)
 
         self._state_machine = fysom.Fysom(

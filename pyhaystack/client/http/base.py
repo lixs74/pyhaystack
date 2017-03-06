@@ -146,7 +146,7 @@ class HTTPClient(object):
             else:
                 result = (defaults or {}).copy()
                 if exclude is not None:
-                    for param in exclude:
+                    for param in given:
                         result.pop(param, None)
 
             if given is not None:

@@ -10,12 +10,12 @@ import re
 
 from ....util import state
 from ....util.asyncexc import AsynchronousException
-from ...http.auth import BasicAuthenticationCredentials
+from ...http.auth import DigestAuthenticationCredentials
 from ...http.exceptions import HTTPStatusError
 
 class Niagara4AuthenticateOperation(state.HaystackOperation):
     """
-    An implementation of the log-in procedure for Niagara AX.  The procedure
+    An implementation of the log-in procedure for Niagara 4.  The procedure
     is as follows:
 
     1. Do a request of the log-in URL, without credentials.  This sets session
@@ -49,10 +49,11 @@ class Niagara4AuthenticateOperation(state.HaystackOperation):
         """
 
         super(Niagara4AuthenticateOperation, self).__init__()
+        print('init')
         self._retries = retries
         self._session = session
         self._cookies = {}
-        self._auth = BasicAuthenticationCredentials(session._username,
+        self._auth = DigestAuthenticationCredentials(session._username,
                                                     session._password)
 
         self._state_machine = fysom.Fysom(
@@ -79,6 +80,7 @@ class Niagara4AuthenticateOperation(state.HaystackOperation):
         Start the request.
         """
         # Are we logged in?
+        print('Go called')
         try:
             self._state_machine.get_new_session()
         except: # Catch all exceptions to pass to caller.
@@ -88,9 +90,10 @@ class Niagara4AuthenticateOperation(state.HaystackOperation):
         """
         Request the log-in cookie.
         """
+        print('New session called')
         try:
             self._session._get('prelogin?clear=true', self._on_new_session,
-                    cookies={}, headers={}, exclude_cookies=True,
+                    cookies={}, headers={}, exclude_cookies=False,
                     exclude_headers=True, api=False)
         except: # Catch all exceptions to pass to caller.
             self._state_machine.exception(result=AsynchronousException())
@@ -99,6 +102,7 @@ class Niagara4AuthenticateOperation(state.HaystackOperation):
         """
         Retrieve the log-in cookie.
         """
+        print('Response : ')
         try:
             if isinstance(response, AsynchronousException):
                 try:
@@ -109,8 +113,8 @@ class Niagara4AuthenticateOperation(state.HaystackOperation):
                     else:
                         raise
             
-            self._cookies = response.cookies.copy()
-            print(self._cookies)
+            self._cookies = self._session._client._session.cookies.get_dict().copy()
+            print('Cookies', self._cookies)
             self._state_machine.do_username()
         except: # Catch all exceptions to pass to caller.
             self._state_machine.exception(result=AsynchronousException())
@@ -119,15 +123,14 @@ class Niagara4AuthenticateOperation(state.HaystackOperation):
         """
         Prelogin step : enter username
         """
+        print('Prelogin step')
         try:
-            self._session._post('prelogin', self._on_username,
-                    params={
-                        'token':'',
-                        'scheme':'cookieDigest',
-                        'absPathBase':'/',
-                        'Referer':self._session._client.uri+'prelogin/',
-                        'accept':'text/zinc; charset=utf-8',
-                        'cookiePostfix' : self._cookies['JSESSIONID'],
+            self._session._post('login-submit', self._on_username,
+                    params={    
+                        'Referer':self._session._client.uri+'/prelogin/',
+                        'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'contentType':'application/x-www-form-urlencoded',
+                        'Cookie' : self._cookies['JSESSIONID'],
                     },
                     headers={}, cookies=self._cookies,
                     exclude_cookies=True, exclude_proxies=True,
@@ -139,6 +142,7 @@ class Niagara4AuthenticateOperation(state.HaystackOperation):
         """
         Retrieve the log-in cookie.
         """
+        print('On Username')
         try:
             if isinstance(response, AsynchronousException):
                 try:
@@ -149,25 +153,23 @@ class Niagara4AuthenticateOperation(state.HaystackOperation):
                     else:
                         raise
                         
-            print(response.text)
-            
-            self._cookies = response.cookies.copy()
-            print('cookies', self._cookies)
+            print(response)
+            self._cookies = self._session._client._session.cookies.get_dict().copy()
+            #self._cookies = response.cookies.copy()
+            print('2- cookies', self._cookies)
             self._state_machine.do_login()
         except: # Catch all exceptions to pass to caller.
             self._state_machine.exception(result=AsynchronousException())
 
 
     def _do_login(self, event):
+        print('Do Login...')
         try:
-            self._session._post('login', self._on_login,
+            self._session._get('j_security_check', self._on_login,
                     params={
-                        'token':'',
-                        'scheme':'cookieDigest',
-                        'absPathBase':'/',
-                        'Referer':self._session._client.uri+'login/',
-                        'accept':'text/zinc; charset=utf-8',
-                        'cookiePostfix' : self._cookies['JSESSIONID'],
+                        'Referer':self._session._client.uri+'/login/',
+                        'accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'Cookie' : self._cookies['JSESSIONID'],
                     },
                     headers={}, cookies=self._cookies,
                     exclude_cookies=True, exclude_proxies=True,
@@ -179,6 +181,8 @@ class Niagara4AuthenticateOperation(state.HaystackOperation):
         """
         See if the login succeeded.
         """
+        print('On Login')
+        print(response)
         try:
             if isinstance(response, AsynchronousException):
                 try:
@@ -204,6 +208,7 @@ class Niagara4AuthenticateOperation(state.HaystackOperation):
         """
         if self._retries > 0:
             self._retries -= 1
+            print('Retry')
             self._state_machine.retry()
         else:
             self._state_machine.abort(result=event.result)
