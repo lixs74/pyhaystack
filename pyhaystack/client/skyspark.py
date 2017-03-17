@@ -6,6 +6,7 @@ Skyspark Client support
 
 from .session import HaystackSession
 from .ops.vendor.skyspark import SkysparkAuthenticateOperation
+from .ops.vendor.skyspark_scram import SkysparkScramAuthenticateOperation
 
 class SkysparkHaystackSession(HaystackSession):
     """
@@ -15,7 +16,7 @@ class SkysparkHaystackSession(HaystackSession):
 
     _AUTH_OPERATION = SkysparkAuthenticateOperation
 
-    def __init__(self, uri, username, password, project, **kwargs):
+    def __init__(self, uri, username, password, project = '', **kwargs):
         """
         Initialise a Skyspark Project Haystack session handler.
 
@@ -56,3 +57,25 @@ class SkysparkHaystackSession(HaystackSession):
             self._client.cookies = None
         finally:
             self._auth_op = None
+
+class SkysparkScramHaystackSession(SkysparkHaystackSession):
+    """
+    The SkysparkHaystackSession class implements some base support for
+    Skyspark servers.
+    """
+
+    _AUTH_OPERATION = SkysparkScramAuthenticateOperation
+    
+    def __init__(self, uri, username, password, **kwargs):
+        """
+        Initialise a Skyspark Project Haystack session handler.
+
+        :param uri: Base URI for the Haystack installation.
+        :param username: Authentication user name.
+        :param password: Authentication password.
+        :param project: Skyspark project name
+        """     
+        self._username = username
+        self._password = password
+        self._authenticated = False
+        super(SkysparkScramHaystackSession, self).__init__(uri, username, password, **kwargs)
