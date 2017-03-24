@@ -23,12 +23,12 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
     An implementation of the log-in procedure for Skyspark.  The procedure
     is as follows:
 
-    1.  
-    2.  
-    3.  
-    4.  
-    5.  
-    6.  
+    1. Hello -> initiate the authentication conversation, sending the username we wish to authenticate as.
+    2. First Message -> Send an authentication request to the server using the user name and a nonce
+    3. Second Message -> Send an encoded message that proves we have the password.
+    4. Retrieve the authToken send back by the server
+    5. Optional -> Verifying that we are communicating with the correct server
+    6. Using AuthToken to send request to the SkySpark Rest API: Authorization: BEARER authToken=aaabbbcccddd
 
     Future requests should the cookies returned.
     """
@@ -51,7 +51,7 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
         self._username = None
         self._user_salt = None
         self._digest = None
-        
+
         self._algorithm = None
         self._handshake_token = None
         self._server_first_msg  = None
@@ -60,7 +60,7 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
         self._server_iterations = None
         self._auth_token = None
         self._auth = None
-        
+
         self._login_uri = '%s'   % \
                 (session._client.uri)
         self._state_machine = fysom.Fysom(
@@ -100,7 +100,7 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
         """
         try:
             self._session._get('%s/user/login' % self._login_uri,
-                    callback=self._on_new_session,                  
+                    callback=self._on_new_session,
                     cookies={}, headers={}, exclude_cookies=True,
                     exclude_headers=True, api=False)
                     #args={'username': self._session._username},
@@ -114,33 +114,33 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
         """
         try:
             #if isinstance(response, AsynchronousException):
-            #    response.reraise()  
+            #    response.reraise()
             #login_params = {}
             #for line in response.text.split('\n'):
             #    key, value = line.split(':')
             #    login_params[key] = value#
 
             #self._username = login_params['username']
-            
+
             self._nonce = scram.get_nonce()
             self._salt_username = scram.base64_no_padding(self._session._username)
-            self._client_first_message = "HELLO username=%s" % (self._salt_username)
+            self.client_first_message = "HELLO username=%s" % (self._salt_username)
             self._state_machine.do_hs_token()
         except Exception as e: # Catch all exceptions to pass to caller.
             #print('Except new session', e)
             self._state_machine.exception(result=AsynchronousException())
-            
+
     def _do_hs_token(self, event):
 
         try:
             self._session._get('%s/ui' % self._login_uri,
                     callback=self._validate_hs_token,
-                    headers={"Authorization": self._client_first_message}, 
+                    headers={"Authorization": self.client_first_message},
                     exclude_cookies=True, api=False)
         except Exception as e:
             print('do hs', e)
             self._state_machine.exception(result=AsynchronousException())
-        
+
     def _validate_hs_token(self, response):
         try:
             response.reraise() # ← AsynchronousException class
@@ -166,21 +166,22 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
             except Exception as e:
                 print('Except validate', e)
                 self._state_machine.exception(result=AsynchronousException())
-            
+
+
     def _do_second_msg(self, event):
-        client_second_msg = "n=%s,r=%s" % (self._username, self._nonce)
-        client_second_msg_encoded = scram.base64_no_padding(client_second_msg)
+        self._client_second_msg = "n=%s,r=%s" % (self._session._username, self._nonce)
+        client_second_msg_encoded = scram.base64_no_padding(self._client_second_msg)
         authMsg = "SCRAM handshakeToken=%s, data=%s" % (self._handshake_token , client_second_msg_encoded )
         try:
             # Post
             self._session._get('%s/ui' % self._login_uri,
                     callback=self._validate_sec_msg,
-                    headers={"Authorization": authMsg}, 
+                    headers={"Authorization": authMsg},
                     exclude_cookies=True,
                     exclude_headers=True, api=False)
         except:
             self._state_machine.exception(result=AsynchronousException())
-        
+
     def _validate_sec_msg(self, response):
         try:
             response.reraise() # ← AsynchronousException class
@@ -194,7 +195,6 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
                 missing_padding = len(server_data) % 4
                 if missing_padding != 0:
                     server_data += '='* (4 - missing_padding)
-        
                 server_data = scram.b64decode(server_data).decode()
                 tab_response = server_data.split(',')
                 self._server_first_msg = server_data
@@ -203,7 +203,7 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
                 self._server_iterations = scram.regex_after_equal(tab_response[2])
                 if not self._server_nonce.startswith(self._nonce):
                     raise Exception("Server returned an invalid nonce.")
-    
+
                 self._state_machine.do_server_token()
             except Exception as e:
                 print('Except validate sec', e)
@@ -211,53 +211,61 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
 
     def _do_server_token(self, event):
         client_final_no_proof = "c=%s,r=%s" % ( scram.standard_b64encode(b'n,,').decode() , self._server_nonce )
-        auth_msg = "%s,%s,%s" % ( self._client_first_message, self._server_first_msg, client_final_no_proof )
-        client_key = hmac.new(unhexlify(scram.salted_password(self._server_salt, self._server_iterations, self._algorithm_name, self._session._password)), "Client Key".encode('UTF-8'), self._algorithm).hexdigest()
-        stored_key = scram._hash_sha256(unhexlify(client_key), self._algorithm)
-        client_signature = hmac.new( unhexlify(stored_key), auth_msg.encode('utf-8'), self._algorithm).hexdigest()
-        client_proof = scram._xor(client_key, client_signature)
-        client_proof_encode = b2a_base64(unhexlify(client_proof)).decode()
-        client_final = client_final_no_proof + ",p=" + client_proof_encode
-        client_final_base64 = scram.base64_no_padding(client_final)
-        final_msg = "scram handshaketoken=%s,data=%s" % (self._handshake_token , client_final_base64)
-        try:            
+        auth_msg              = "%s,%s,%s" % ( self._client_second_msg, self._server_first_msg, client_final_no_proof )
+        client_key            = hmac.new(unhexlify(scram.salted_password(self._server_salt, self._server_iterations, self._algorithm_name, self._session._password)), "Client Key".encode('UTF-8'), self._algorithm).hexdigest()
+        stored_key            = scram._hash_sha256(unhexlify(client_key), self._algorithm)
+        client_signature      = hmac.new( unhexlify(stored_key), auth_msg.encode('utf-8'), self._algorithm).hexdigest()
+        client_proof          = scram._xor(client_key, client_signature)
+        client_proof_encode   = b2a_base64(unhexlify(client_proof)).decode()
+        client_final          = client_final_no_proof + ",p=" + client_proof_encode
+        client_final_base64   = scram.base64_no_padding(client_final)
+        final_msg             = "scram handshaketoken=%s,data=%s" % (self._handshake_token , client_final_base64)
+
+        try:
             self._session._get('%s/ui' % self._login_uri,
                     callback=self._validate_server_token,
-                    headers={"Authorization": final_msg}, 
+                    headers={"Authorization": final_msg},
                     exclude_cookies=True,
                     exclude_headers=True, api=False)
-        
+
         except Exception as e:
             print('Except do server token', e)
             self._state_machine.exception(result=AsynchronousException())
 
     def _validate_server_token(self, response):
-        try:
-            response.reraise() # ← AsynchronousException class
-        except HTTPStatusError as e:
-            if e.status != 401 and e.status != 303:
-                raise
-            else:
-                response = e
+
+
+         #TODO -> Pierre Sigwalt: Commented that part as it's blocking to go after, don't know why yet not sure we need to reraise
+        #try:
+        #    response.reraise() # ← AsynchronousException class
+        #except HTTPStatusError as e:
+        #    if e.status != 401 and e.status != 303:
+        #        raise
+        #    else:
+        #        response = e
+
         try:
             server_response = response.headers['Authentication-Info']
             tab_response = server_response.split(',')
             self._auth_token = scram.regex_after_equal(tab_response[0])
-            print("Will use token: " + self._auth_token)
             self._auth = "BEARER authToken=%s" % self._auth_token
+            print("Header: ", self._auth)
+            self._state_machine.login_done(result={'header': {'Authorization': self._auth} })
 
+            #TODO -> Pierre Sigwalt SCRAM auth normaly don't need a cookie bu only Authorization headers
             # Locate the cookie in the response.
-            cookie_match = self._COOKIE_RE.match(response.text)
-            if not cookie_match:
-                raise IOError('No cookie in response, log-in failed.')
+            #cookie_match = self._COOKIE_RE.match(response.text)
+            #if not cookie_match:
+            #    raise IOError('No cookie in response, log-in failed.')
 
-            (cookie_name, cookie_value) = cookie_match.groups()
-            self._state_machine.login_done(result={'header': {'Authorization': self._auth},
-                                                   'cookies': {cookie_name: cookie_value}})
+            #(cookie_name, cookie_value) = cookie_match.groups()
+            #self._state_machine.login_done(result={'header': {'Authorization': self._auth},
+            #                                       'cookies': {cookie_name: cookie_value}})
+
         except Exception as e:
             print('Except _validate_server_token', e)
             self._state_machine.exception(result=AsynchronousException())
-        
+
     def _do_fail_retry(self, event):
         """
         Determine whether we retry or fail outright.
@@ -272,24 +280,25 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
         """
         Return the result from the state machine.
         """
+        print(event.result)
         print('Auth :', self._auth)
         self._done(event.result)
-        
-def get_digest_info(param):    
+
+def get_digest_info(param):
     message = binary_encoding("%s:%s" % (param['username'], param['userSalt']))
-    password_buf = binary_encoding(param['password']) 
+    password_buf = binary_encoding(param['password'])
     hmac_final = base64.b64encode(hmac.new(key=password_buf, msg=message, digestmod=hashlib.sha1).digest())
-    
+
     digest_msg = binary_encoding('%s:%s' % (hmac_final.decode('utf-8'), param['nonce']))
     digest = hashlib.sha1()
     digest.update(digest_msg)
     digest_final = base64.b64encode((digest.digest()))
-    
+
     res ={'hmac' : hmac_final.decode('utf-8'),
          'digest' : digest_final.decode('utf-8'),
          'nonce' : param['nonce']}
     return res
-    
+
 def binary_encoding(string, encoding = 'utf-8'):
     """
     This helper function will allow compatibility with Python 2 and 3
