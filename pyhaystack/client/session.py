@@ -496,7 +496,7 @@ class HaystackSession(object):
 
     # Protected methods/properties
 
-    def _get(self, uri, callback, api=True, **kwargs):
+    def _get(self, uri, callback, api=False, **kwargs):
         """
         Perform a raw HTTP GET operation.  This is a convenience wrapper around
         the HTTP client class that allows pre/post processing of the request by
@@ -521,7 +521,7 @@ class HaystackSession(object):
         return op
 
     def _post(self, uri, callback, body=None, body_type=None, body_size=None,
-            headers=None, api=True, **kwargs):
+            headers=None, api=False, **kwargs):
         """
         Perform a raw HTTP POST operation.  This is a convenience wrapper around
         the HTTP client class that allows pre/post processing of the request by

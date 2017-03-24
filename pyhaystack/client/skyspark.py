@@ -58,7 +58,7 @@ class SkysparkHaystackSession(HaystackSession):
         finally:
             self._auth_op = None
 
-class SkysparkScramHaystackSession(SkysparkHaystackSession):
+class SkysparkScramHaystackSession(HaystackSession):
     """
     The SkysparkHaystackSession class implements some base support for
     Skyspark servers.
@@ -66,7 +66,7 @@ class SkysparkScramHaystackSession(SkysparkHaystackSession):
 
     _AUTH_OPERATION = SkysparkScramAuthenticateOperation
     
-    def __init__(self, uri, username, password, **kwargs):
+    def __init__(self, uri, username, password, project = '', **kwargs):
         """
         Initialise a Skyspark Project Haystack session handler.
 
@@ -75,7 +75,39 @@ class SkysparkScramHaystackSession(SkysparkHaystackSession):
         :param password: Authentication password.
         :param project: Skyspark project name
         """     
+        super(SkysparkScramHaystackSession, self).__init__(uri,
+             'api/%s' % project,**kwargs)
+
         self._username = username
         self._password = password
+        self._project = project
         self._authenticated = False
-        super(SkysparkScramHaystackSession, self).__init__(uri, username, password, **kwargs)
+        
+    @property
+    def is_logged_in(self):
+        """
+        Return true if the user is logged in.
+        """
+        return self._authenticated
+
+    # Private methods/properties
+
+    def _on_authenticate_done(self, operation, **kwargs):
+        """
+        Process the result of an authentication operation.  This needs to be
+        implemented in the subclass and should, at minimum, set a flag in the
+        subclass to indicate the authentication state and clear the _auth_op
+        attribute on the base class.
+        """
+        try:
+            op_result = operation.result
+            cookies = op_result['cookies']
+            header = op_result['header']
+            self._authenticated = True
+            self._client.cookies = cookies
+            self._client.headers = header
+        except:
+            self._authenticated = False
+            self._client.cookies = None
+        finally:
+            self._auth_op = None
