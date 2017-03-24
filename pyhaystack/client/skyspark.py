@@ -101,7 +101,6 @@ class SkysparkScramHaystackSession(HaystackSession):
         """
         try:
             op_result = operation.result
-            #   cookies = op_result['cookies']
             header = op_result['header']
             self._authenticated = True
             self._client.cookies = None
