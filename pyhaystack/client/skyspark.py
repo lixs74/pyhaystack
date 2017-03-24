@@ -66,7 +66,7 @@ class SkysparkScramHaystackSession(HaystackSession):
 
     _AUTH_OPERATION = SkysparkScramAuthenticateOperation
     
-    def __init__(self, uri, username, password, project = '', **kwargs):
+    def __init__(self, uri, username, password, project, **kwargs):
         """
         Initialise a Skyspark Project Haystack session handler.
 
@@ -101,10 +101,10 @@ class SkysparkScramHaystackSession(HaystackSession):
         """
         try:
             op_result = operation.result
-            cookies = op_result['cookies']
+            #   cookies = op_result['cookies']
             header = op_result['header']
             self._authenticated = True
-            self._client.cookies = cookies
+            self._client.cookies = None
             self._client.headers = header
         except:
             self._authenticated = False
