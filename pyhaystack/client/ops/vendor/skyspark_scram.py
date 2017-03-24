@@ -115,19 +115,11 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
         try:
             #if isinstance(response, AsynchronousException):
             #    response.reraise()
-            #login_params = {}
-            #for line in response.text.split('\n'):
-            #    key, value = line.split(':')
-            #    login_params[key] = value#
-
-            #self._username = login_params['username']
-
             self._nonce = scram.get_nonce()
             self._salt_username = scram.base64_no_padding(self._session._username)
             self.client_first_message = "HELLO username=%s" % (self._salt_username)
             self._state_machine.do_hs_token()
         except Exception as e: # Catch all exceptions to pass to caller.
-            #print('Except new session', e)
             self._state_machine.exception(result=AsynchronousException())
 
     def _do_hs_token(self, event):
@@ -138,7 +130,6 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
                     headers={"Authorization": self.client_first_message},
                     exclude_cookies=True, api=False)
         except Exception as e:
-            print('do hs', e)
             self._state_machine.exception(result=AsynchronousException())
 
     def _validate_hs_token(self, response):
@@ -152,7 +143,6 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
                 header_response = server_response.split(',')
                 algorithm = scram.regex_after_equal( header_response[1] )
                 algorithm_name = algorithm.replace("-", "").lower()
-                #print('validate', server_response)
                 if algorithm_name == "sha256":
                     self._algorithm = sha256
                     self._algorithm_name = "sha256"
@@ -164,7 +154,6 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
                 self._handshake_token = scram.regex_after_equal(header_response[0])
                 self._state_machine.do_second_msg()
             except Exception as e:
-                print('Except validate', e)
                 self._state_machine.exception(result=AsynchronousException())
 
 
@@ -206,7 +195,6 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
 
                 self._state_machine.do_server_token()
             except Exception as e:
-                print('Except validate sec', e)
                 self._state_machine.exception(result=AsynchronousException())
 
     def _do_server_token(self, event):
@@ -229,41 +217,17 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
                     exclude_headers=True, api=False)
 
         except Exception as e:
-            print('Except do server token', e)
             self._state_machine.exception(result=AsynchronousException())
 
     def _validate_server_token(self, response):
-
-
-         #TODO -> Pierre Sigwalt: Commented that part as it's blocking to go after, don't know why yet not sure we need to reraise
-        #try:
-        #    response.reraise() # ← AsynchronousException class
-        #except HTTPStatusError as e:
-        #    if e.status != 401 and e.status != 303:
-        #        raise
-        #    else:
-        #        response = e
-
         try:
             server_response = response.headers['Authentication-Info']
             tab_response = server_response.split(',')
             self._auth_token = scram.regex_after_equal(tab_response[0])
             self._auth = "BEARER authToken=%s" % self._auth_token
-            print("Header: ", self._auth)
             self._state_machine.login_done(result={'header': {'Authorization': self._auth} })
 
-            #TODO -> Pierre Sigwalt SCRAM auth normaly don't need a cookie bu only Authorization headers
-            # Locate the cookie in the response.
-            #cookie_match = self._COOKIE_RE.match(response.text)
-            #if not cookie_match:
-            #    raise IOError('No cookie in response, log-in failed.')
-
-            #(cookie_name, cookie_value) = cookie_match.groups()
-            #self._state_machine.login_done(result={'header': {'Authorization': self._auth},
-            #                                       'cookies': {cookie_name: cookie_value}})
-
         except Exception as e:
-            print('Except _validate_server_token', e)
             self._state_machine.exception(result=AsynchronousException())
 
     def _do_fail_retry(self, event):
@@ -280,8 +244,6 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
         """
         Return the result from the state machine.
         """
-        print(event.result)
-        print('Auth :', self._auth)
         self._done(event.result)
 
 def get_digest_info(param):
