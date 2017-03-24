@@ -9,9 +9,9 @@ import os
 def get_nonce():
     return b2a_hex(os.urandom(32)).decode()
 
-def _hash_sha256(self, str):
-    hashFunc = self.algorithm()
-    hashFunc.update( str )
+def _hash_sha256(client_key, algorithm):
+    hashFunc = algorithm()
+    hashFunc.update(client_key)
     return hashFunc.hexdigest()
 
 def salted_password(salt, iterations, algorithm_name, password):
@@ -28,7 +28,7 @@ def regex_after_equal(s):
     tmp_str = re.search( "\=(.*)$" ,s, flags=0)
     return tmp_str.group(1)
 
-def _xor(self, s1, s2):
+def _xor(s1, s2):
     return hex(int(s1, 16) ^ int(s2, 16))[2:]
 
 

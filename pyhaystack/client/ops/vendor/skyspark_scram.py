@@ -16,6 +16,7 @@ from binascii import b2a_hex, unhexlify, b2a_base64, hexlify
 
 from ....util import state, scram
 from ....util.asyncexc import AsynchronousException
+from ...http.exceptions import HTTPStatusError
 
 class SkysparkScramAuthenticateOperation(state.HaystackOperation):
     """
@@ -95,123 +96,149 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
 
     def _do_new_session(self, event):
         """
-        Request the log-in parameters.
+        Test if server respond...
         """
         try:
-            self._session._get(self._login_uri,
-                    callback=self._on_new_session,
-                    
+            self._session._get('%s/user/login' % self._login_uri,
+                    callback=self._on_new_session,                  
                     cookies={}, headers={}, exclude_cookies=True,
                     exclude_headers=True, api=False)
                     #args={'username': self._session._username},
         except: # Catch all exceptions to pass to caller.
-            self._state_machine.exception(result=AsynchronousException())
+            pass
+
 
     def _on_new_session(self, response):
         """
         Retrieve the log-in parameters.
         """
         try:
-            if isinstance(response, AsynchronousException):
-                response.reraise()
-                
+            #if isinstance(response, AsynchronousException):
+            #    response.reraise()  
+            #login_params = {}
+            #for line in response.text.split('\n'):
+            #    key, value = line.split(':')
+            #    login_params[key] = value#
+
+            #self._username = login_params['username']
+            
             self._nonce = scram.get_nonce()
-            self._salt_username = scram.base64_no_padding(self._username)
+            self._salt_username = scram.base64_no_padding(self._session._username)
             self._client_first_message = "HELLO username=%s" % (self._salt_username)
-            print('new_session', self._nonce, self._client_first_message)
             self._state_machine.do_hs_token()
-        except: # Catch all exceptions to pass to caller.
+        except Exception as e: # Catch all exceptions to pass to caller.
+            #print('Except new session', e)
             self._state_machine.exception(result=AsynchronousException())
             
     def _do_hs_token(self, event):
 
         try:
-            self._session._get(self._login_uri,
+            self._session._get('%s/ui' % self._login_uri,
                     callback=self._validate_hs_token,
                     headers={"Authorization": self._client_first_message}, 
-                    exclude_cookies=True,
-                    exclude_headers=False, api=False)
-        except:
+                    exclude_cookies=True, api=False)
+        except Exception as e:
+            print('do hs', e)
             self._state_machine.exception(result=AsynchronousException())
         
     def _validate_hs_token(self, response):
         try:
-            server_response      = response.headers['WWW-Authenticate']
-            header_response      = server_response.split(',')
-            algorithm = scram.regex_after_equal( header_response[1] )
-            algorithm_name = algorithm.replace("-", "").lower()
-
-            if algorithm_name == "sha256":
-                self._algorithm = sha256
-            elif algorithm_name == "sha1":
-                self._algorithm = sha1
-            else:
-                raise Exception('SHA not implemented')
-            self._handshake_token = scram.regex_after_equal(header_response[0])
-            self._state_machine.do_second_msg()
-        except:
-            self._state_machine.exception(result=AsynchronousException())
-        
+            response.reraise() # ← AsynchronousException class
+        except HTTPStatusError as e:
+            if e.status != 401 and e.status != 303:
+                raise
+            try:
+                server_response = e.headers['WWW-Authenticate']
+                header_response = server_response.split(',')
+                algorithm = scram.regex_after_equal( header_response[1] )
+                algorithm_name = algorithm.replace("-", "").lower()
+                #print('validate', server_response)
+                if algorithm_name == "sha256":
+                    self._algorithm = sha256
+                    self._algorithm_name = "sha256"
+                elif algorithm_name == "sha1":
+                    self._algorithm = sha1
+                    self._algorithm_name = "sha1"
+                else:
+                    raise Exception('SHA not implemented')
+                self._handshake_token = scram.regex_after_equal(header_response[0])
+                self._state_machine.do_second_msg()
+            except Exception as e:
+                print('Except validate', e)
+                self._state_machine.exception(result=AsynchronousException())
+            
     def _do_second_msg(self, event):
         client_second_msg = "n=%s,r=%s" % (self._username, self._nonce)
         client_second_msg_encoded = scram.base64_no_padding(client_second_msg)
         authMsg = "SCRAM handshakeToken=%s, data=%s" % (self._handshake_token , client_second_msg_encoded )
         try:
             # Post
-            self._session._get(self._login_uri,
+            self._session._get('%s/ui' % self._login_uri,
                     callback=self._validate_sec_msg,
-                    headers={"Authorization": authMsg }, 
+                    headers={"Authorization": authMsg}, 
                     exclude_cookies=True,
-                    exclude_headers=False, api=False)
+                    exclude_headers=True, api=False)
         except:
             self._state_machine.exception(result=AsynchronousException())
         
     def _validate_sec_msg(self, response):
         try:
-            header_response = response.headers['WWW-Authenticate']
-            tab_header = header_response.split(',')
-            server_data = scram.regex_after_equal(tab_header[0])
-            missing_padding = len(server_data) % 4
-            if missing_padding != 0:
-                server_data += '='* (4 - missing_padding)
+            response.reraise() # ← AsynchronousException class
+        except HTTPStatusError as e:
+            if e.status != 401 and e.status != 303:
+                raise
+            try:
+                header_response = e.headers['WWW-Authenticate']
+                tab_header = header_response.split(',')
+                server_data = scram.regex_after_equal(tab_header[0])
+                missing_padding = len(server_data) % 4
+                if missing_padding != 0:
+                    server_data += '='* (4 - missing_padding)
+        
+                server_data = scram.b64decode(server_data).decode()
+                tab_response = server_data.split(',')
+                self._server_first_msg = server_data
+                self._server_nonce = scram.regex_after_equal(tab_response[0])
+                self._server_salt = scram.regex_after_equal(tab_response[1])
+                self._server_iterations = scram.regex_after_equal(tab_response[2])
+                if not self._server_nonce.startswith(self._nonce):
+                    raise Exception("Server returned an invalid nonce.")
     
-            server_data       = scram.b64decode(server_data).decode()
-            tab_response      = server_data.split(',')
-            self._server_first_msg  = server_data
-            self._server_nonce      = scram.regex_after_equal(tab_response[0])
-            self._server_salt       = scram.regex_after_equal(tab_response[1])
-            self._server_iterations = scram.regex_after_equal(tab_response[2])
-    
-            if not self._server_nonce.startswith(self._nonce):
-                raise Exception("Server returned an invalid nonce.")
-
-            self._state_machine.do_server_token()
-        except:
-            self._state_machine.exception(result=AsynchronousException())
+                self._state_machine.do_server_token()
+            except Exception as e:
+                print('Except validate sec', e)
+                self._state_machine.exception(result=AsynchronousException())
 
     def _do_server_token(self, event):
-        try:
-            client_final_no_proof = "c=%s,r=%s" % ( scram.standard_b64encode(b'n,,').decode() , self._server_nonce )
-            auth_msg = "%s,%s,%s" % ( self._client_first_msg, self._server_first_msg, client_final_no_proof )
-            client_key = hmac.new(unhexlify(self.salted_password( self._server_salt, self._server_iterations ) ), "Client Key".encode('UTF-8'), self._algorithm).hexdigest()
-            stored_key = scram._hash_sha256(unhexlify(client_key))
-            client_signature = hmac.new( unhexlify(stored_key), auth_msg.encode('utf-8'), self.algorithm).hexdigest()
-            client_proof = scram._xor (client_key, client_signature)
-            client_proof_encode = b2a_base64(unhexlify(client_proof)).decode()
-            client_final = client_final_no_proof + ",p=" + client_proof_encode
-            client_final_base64 = scram.base64_no_padding(client_final)
-            final_msg = "scram handshaketoken=%s,data=%s" % (self._handshake_token , client_final_base64)
-            
-            self._session._get(self._login_uri,
-                    callback=self._validate_sec_msg,
-                    headers={"Authorization", final_msg}, 
+        client_final_no_proof = "c=%s,r=%s" % ( scram.standard_b64encode(b'n,,').decode() , self._server_nonce )
+        auth_msg = "%s,%s,%s" % ( self._client_first_message, self._server_first_msg, client_final_no_proof )
+        client_key = hmac.new(unhexlify(scram.salted_password(self._server_salt, self._server_iterations, self._algorithm_name, self._session._password)), "Client Key".encode('UTF-8'), self._algorithm).hexdigest()
+        stored_key = scram._hash_sha256(unhexlify(client_key), self._algorithm)
+        client_signature = hmac.new( unhexlify(stored_key), auth_msg.encode('utf-8'), self._algorithm).hexdigest()
+        client_proof = scram._xor(client_key, client_signature)
+        client_proof_encode = b2a_base64(unhexlify(client_proof)).decode()
+        client_final = client_final_no_proof + ",p=" + client_proof_encode
+        client_final_base64 = scram.base64_no_padding(client_final)
+        final_msg = "scram handshaketoken=%s,data=%s" % (self._handshake_token , client_final_base64)
+        try:            
+            self._session._get('%s/ui' % self._login_uri,
+                    callback=self._validate_server_token,
+                    headers={"Authorization": final_msg}, 
                     exclude_cookies=True,
                     exclude_headers=True, api=False)
         
-        except:
+        except Exception as e:
+            print('Except do server token', e)
             self._state_machine.exception(result=AsynchronousException())
 
     def _validate_server_token(self, response):
+        try:
+            response.reraise() # ← AsynchronousException class
+        except HTTPStatusError as e:
+            if e.status != 401 and e.status != 303:
+                raise
+            else:
+                response = e
         try:
             server_response = response.headers['Authentication-Info']
             tab_response = server_response.split(',')
@@ -219,10 +246,18 @@ class SkysparkScramAuthenticateOperation(state.HaystackOperation):
             print("Will use token: " + self._auth_token)
             self._auth = "BEARER authToken=%s" % self._auth_token
 
-            self._state_machine.login_done(result={'Authorization': self._auth})
-        except:
-            pass
-            
+            # Locate the cookie in the response.
+            cookie_match = self._COOKIE_RE.match(response.text)
+            if not cookie_match:
+                raise IOError('No cookie in response, log-in failed.')
+
+            (cookie_name, cookie_value) = cookie_match.groups()
+            self._state_machine.login_done(result={'header': {'Authorization': self._auth},
+                                                   'cookies': {cookie_name: cookie_value}})
+        except Exception as e:
+            print('Except _validate_server_token', e)
+            self._state_machine.exception(result=AsynchronousException())
+        
     def _do_fail_retry(self, event):
         """
         Determine whether we retry or fail outright.
