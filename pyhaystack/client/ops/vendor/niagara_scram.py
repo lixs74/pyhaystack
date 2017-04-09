@@ -159,8 +159,8 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
             self._session._post('%s/j_security_check' % (self._login_uri),
                     body=msg.encode('utf-8'),
                     callback=self._on_second_msg,
-                    headers={"Content-Type": "application/x-niagara-login-support",
-                             "Cookie": 'niagara_userid=%s' % (self._session._username)},
+                    headers={"Content-Type": "application/x-niagara-login-support"},
+                    #         "Cookie": 'niagara_userid=%s' % (self._session._username)},
                     exclude_cookies=True, api=False)
         except Exception as e:
             self._state_machine.exception(result=AsynchronousException())
@@ -194,6 +194,10 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
             self.server_iterations = scram.regex_after_equal( tab_response[2] )
             self._algorithm_name = "sha256"
             self._algorithm = sha256
+            
+            print('Nonce :', self.server_nonce, '\n',
+                  'Server Salt :', self.server_salt, '\n',
+                  'Server iter :', self.server_iterations)
     
             #self._handshake_token = scram.regex_after_equal(header_response[0])
             self._state_machine.do_validate_second()
@@ -204,27 +208,31 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
     def _do_authenticated(self, event):
         print('do auth msg')
         self.salted_password = scram.salted_password( self.server_salt, self.server_iterations, self._algorithm_name, self._session._password )
-        
+        print('Salted password :', self.salted_password)
         client_final_without_proof = "c=%s,r=%s" % ( scram.standard_b64encode(b'n,,').decode(), 
                                                     self.server_nonce )
+        print('Client final wo proof :', client_final_without_proof)
         self.auth_msg = "%s,%s,%s" % ( self.client_first_msg, self.server_first_msg, 
                                       client_final_without_proof )
                 
+        print('Auth msg :', self.auth_msg)
         
-        self._client_second_msg = "n=%s,r=%s" % (self._session._username, self._nonce)
-        client_second_msg_encoded = scram.base64_no_padding(self._client_second_msg)
-        authMsg = "SCRAM handshakeToken=%s, data=%s" % (self._handshake_token , client_second_msg_encoded )
-        client_proof = _createClientProof(self.salted_password, authMsg, self._algorithm)
+        client_proof = _createClientProof(self.salted_password, self.auth_msg, self._algorithm)
         client_final_message = client_final_without_proof + ",p=" + client_proof
         final_msg = 'action=sendClientFinalMessage&clientFinalMessage=%s' % (client_final_message)
+        
+        print('Final Msg : ', final_msg)
+
         try:
             # Post
             self._session._post('%s/j_security_check' % self._login_uri,
                     body=final_msg.encode("utf-8"),
                     callback=self._on_authenticated,
                     headers={"Content-Type": "application/x-niagara-login-support",
-                             'Cookie' : "niagara_userid=%s,JSESSIONID=%s" % (self._session._username, self.jsession)},
- #                   exclude_cookies=True,
+                             'Cookie': 'JSESSIONID=%s'%self.jsession},
+                    #cookies={'JSESSIONID':self.jsession},
+                    #cookies=cookie,
+                    exclude_cookies=True,
                     api=False)
         except:
             self._state_machine.exception(result=AsynchronousException())
