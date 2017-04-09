@@ -10,7 +10,7 @@ def get_nonce():
     return b2a_hex(os.urandom(32)).decode()
 
 def get_nonce_16():
-    return urlsafe_b64encode( os.urandom(16) ).decode()
+    return urlsafe_b64encode( os.urandom(16) ).decode('utf-8')
 
 def _hash_sha256(client_key, algorithm):
     hashFunc = algorithm()
