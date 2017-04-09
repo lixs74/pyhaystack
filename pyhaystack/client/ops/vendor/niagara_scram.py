@@ -154,15 +154,13 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
     def _do_second_msg(self, event):
         print('do_second_msg')
         msg = 'action=sendClientFirstMessage&clientFirstMessage=n,,%s' % self.client_first_msg
-        payload={'action':msg.encode('utf-8')
-                 }       
-                    
+
         try:
             self._session._post('%s/j_security_check' % (self._login_uri),
                     body=msg.encode('utf-8'),
                     callback=self._on_second_msg,
-                    #headers={"Content-Type": "application/x-niagara-login-support",
-                    #         "Cookie": 'niagara_userid=%s' % (self._session._username)},
+                    headers={"Content-Type": "application/x-niagara-login-support",
+                             "Cookie": 'niagara_userid=%s' % (self._session._username)},
                     exclude_cookies=True, api=False)
         except Exception as e:
             self._state_machine.exception(result=AsynchronousException())
@@ -187,7 +185,7 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
 #                raise
 
             self.jsession = get_jession(response.headers['set-cookie'])
-    
+            print('JSESSION : ', self.jsession)
             self.server_first_msg  = response.body.decode('utf-8')	
             print("ServerFirstMessage: " + self.server_first_msg)
             tab_response = self.server_first_msg.split(",")
@@ -219,31 +217,32 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
         client_proof = _createClientProof(self.salted_password, authMsg, self._algorithm)
         client_final_message = client_final_without_proof + ",p=" + client_proof
         final_msg = 'action=sendClientFinalMessage&clientFinalMessage=%s' % (client_final_message)
-        
         try:
             # Post
             self._session._post('%s/j_security_check' % self._login_uri,
                     body=final_msg.encode("utf-8"),
                     callback=self._on_authenticated,
                     headers={"Content-Type": "application/x-niagara-login-support",
-                             "Cookie": "niagara_userid=%s,JSESSIONID=%s" % (self._session._username, self.jsession)},
-                    exclude_cookies=True,
+                             'Cookie' : "niagara_userid=%s,JSESSIONID=%s" % (self._session._username, self.jsession)},
+ #                   exclude_cookies=True,
                     api=False)
         except:
             self._state_machine.exception(result=AsynchronousException())
 
     def _on_authenticated(self, response):
-        print('on_authenticated')
+        print('on_authenticated', response.headers)
         try:
             response.reraise() # ← AsynchronousException class
         except HTTPStatusError as e:
             if e.status != 401 and e.status != 303:
                 raise
             else:
+                print('Error : ', e)
                 response = e
         except AttributeError:
             pass        
         try:
+            print(response.body.decode('utf-8'))
 #                header_response = e.headers['WWW-Authenticate']
 #                tab_header = header_response.split(',')
 #                server_data = scram.regex_after_equal(tab_header[0])
@@ -308,19 +307,18 @@ def binary_encoding(string, encoding = 'utf-8'):
 
 def get_jession(arg_header):
     #revDct = dict((val, key) for (key, val) in arg_header )
-    jsession = arg_header.split(";")[0]
-    print(jsession)
-    return jsession
-#    for key in revDct:
-#        tmp_key = scram.regex_before_equal(key)
-#        if tmp_key == "JSESSIONID=":
-#            jsession = tmp_key = scram.regex_after_equal(key)
-#            jsession = jsession.split(";")[0]
-#            return "JSESSIONID=" + jsession
+    set_cookie = arg_header.split(',')
+    print('GET JSESSION : ', arg_header)
+#    return jsession
+    for key in set_cookie:
+        if "JSESSIONID=" in key:
+            jsession = scram.regex_after_equal(key)
+            jsession = jsession.split(";")[0]
+            return jsession
         
 def _createClientProof(salted_password, auth_msg, algorithm):
     client_key          = hmac.new( unhexlify( salted_password ), "Client Key".encode('UTF-8'), algorithm).hexdigest()
     stored_key          = scram._hash_sha256( unhexlify(client_key), algorithm )
     client_signature    = hmac.new( unhexlify( stored_key ) , auth_msg.encode() , algorithm ).hexdigest()
     client_proof        = scram._xor (client_key, client_signature)
-    return b2a_base64(unhexlify(client_proof)).decode('utf-8')
+    return b2a_base64(unhexlify(client_proof.strip())).decode('utf-8')
