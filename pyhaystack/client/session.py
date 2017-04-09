@@ -502,7 +502,6 @@ class HaystackSession(object):
         the HTTP client class that allows pre/post processing of the request by
         the session instance.
         """
-        print('session get', uri, api, callback)
         if api:
             uri = '%s/%s' % (self._api_dir, uri)
         return self._client.get(uri, callback, **kwargs)
