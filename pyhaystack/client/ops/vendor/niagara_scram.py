@@ -122,7 +122,7 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
         """
         Test if server respond...
         """
-        print('do_new', self._login_uri)
+        print('do_hs_token', self._login_uri)
         try:
             self._session._post('%s/prelogin' % self._login_uri,
                     params={'j_username': self._session._username},
@@ -138,7 +138,7 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
         """
         Retrieve the log-in parameters.
         """
-        print('on_new_session', response.headers)
+        print('on_hs_token', response.headers)
         
         try:
             #if isinstance(response, AsynchronousException):
@@ -152,55 +152,60 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
             self._state_machine.exception(result=AsynchronousException())
 
     def _do_second_msg(self, event):
-        print('do_hs_token')
+        print('do_second_msg')
         msg = 'action=sendClientFirstMessage&clientFirstMessage=n,,%s' % self.client_first_msg
         payload={'action':msg.encode('utf-8')
                  }       
                     
         try:
-            self._session._post('%s/j_security_check/%s' % (self._login_uri, msg.encode("utf-8")),
-                    #params=payload,
+            self._session._post('%s/j_security_check' % (self._login_uri),
+                    body=msg.encode('utf-8'),
                     callback=self._on_second_msg,
-                    headers={"Content-Type": "application/x-niagara-login-support",
-                             "Cookie": 'niagara_userid=%s' % self._session._username},
+                    #headers={"Content-Type": "application/x-niagara-login-support",
+                    #         "Cookie": 'niagara_userid=%s' % (self._session._username)},
                     exclude_cookies=True, api=False)
         except Exception as e:
             self._state_machine.exception(result=AsynchronousException())
 
     def _on_second_msg(self, response):
+        print('on second msg')
         try:
             response.reraise() # ← AsynchronousException class
         except HTTPStatusError as e:
             if e.status != 401 and e.status != 303 and e.status != 500:
                 raise
-            try:
-                print('do validate hs token', e.headers)
+            else:
+                response = e
+        except AttributeError:
+            pass
+        try:
+            print('do validate hs token', response.headers)
 #        try:
 #            response.reraise() # ← AsynchronousException class
 #        except HTTPStatusError as e:
 #            if e.status != 401 and e.status != 303:
 #                raise
 
-                self.jsession = get_jession(e.headers['Set-Cookie'])
+            self.jsession = get_jession(response.headers['set-cookie'])
     
-                self.server_first_msg  = e.text
-                print("ServerFirstMessage: " + self.server_first_msg)
-                tab_response = self.server_first_msg.split(",")
-                self.server_nonce = scram.regex_after_equal( tab_response[0] )
-                self.server_salt = hexlify( scram.b64decode( scram.regex_after_equal( tab_response[1] ) ) )
-                self.server_iterations = scram.regex_after_equal( tab_response[2] )
-                self.algorithm_name = "sha256"
-                self._algorithm = sha256
+            self.server_first_msg  = response.body.decode('utf-8')	
+            print("ServerFirstMessage: " + self.server_first_msg)
+            tab_response = self.server_first_msg.split(",")
+            self.server_nonce = scram.regex_after_equal( tab_response[0] )
+            self.server_salt = hexlify( scram.b64decode( scram.regex_after_equal( tab_response[1] ) ) )
+            self.server_iterations = scram.regex_after_equal( tab_response[2] )
+            self._algorithm_name = "sha256"
+            self._algorithm = sha256
     
-                #self._handshake_token = scram.regex_after_equal(header_response[0])
-                self._state_machine.do_validate_second()
-            except Exception as e:
-                self._state_machine.exception(result=AsynchronousException())
+            #self._handshake_token = scram.regex_after_equal(header_response[0])
+            self._state_machine.do_validate_second()
+        except Exception as e:
+            self._state_machine.exception(result=AsynchronousException())
 
 
     def _do_authenticated(self, event):
         print('do auth msg')
-        self.salted_password = scram.salted_password( self.server_salt, self.server_iterations, self._algorithm_name, self._session.password )
+        self.salted_password = scram.salted_password( self.server_salt, self.server_iterations, self._algorithm_name, self._session._password )
         
         client_final_without_proof = "c=%s,r=%s" % ( scram.standard_b64encode(b'n,,').decode(), 
                                                     self.server_nonce )
@@ -217,25 +222,28 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
         
         try:
             # Post
-            self._session._get('%s/haystack/about' % self._login_uri,
-                    data=final_msg.encode("utf-8"),
+            self._session._post('%s/j_security_check' % self._login_uri,
+                    body=final_msg.encode("utf-8"),
                     callback=self._on_authenticated,
-                    headers={"Content-Type": "application/x-niagara-login-support"},
-                    cookies={"niagara_userid=%s" % self._session.username,
-                             self.jsession},
+                    headers={"Content-Type": "application/x-niagara-login-support",
+                             "Cookie": "niagara_userid=%s,JSESSIONID=%s" % (self._session._username, self.jsession)},
                     exclude_cookies=True,
-                    exclude_headers=True, api=False)
+                    api=False)
         except:
             self._state_machine.exception(result=AsynchronousException())
 
     def _on_authenticated(self, response):
-        print('validate sec msg')
+        print('on_authenticated')
         try:
             response.reraise() # ← AsynchronousException class
         except HTTPStatusError as e:
             if e.status != 401 and e.status != 303:
                 raise
-            try:
+            else:
+                response = e
+        except AttributeError:
+            pass        
+        try:
 #                header_response = e.headers['WWW-Authenticate']
 #                tab_header = header_response.split(',')
 #                server_data = scram.regex_after_equal(tab_header[0])
@@ -252,11 +260,11 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
 #                    raise Exception("Server returned an invalid nonce.")
 
 #                self._state_machine.do_server_token()
-                self._state_machine.login_done(result={'header': {"Content-Type", "application/x-niagara-login-support"},
-                                                       'cookies': "niagara_userid=pyhaystack, JSESSIONID=%s" % self.jsession})
+            self._state_machine.login_done(result={'header': response.headers,
+                                                   'cookies': response.cookies})
 
-            except Exception as e:
-                self._state_machine.exception(result=AsynchronousException())
+        except Exception as e:
+             self._state_machine.exception(result=AsynchronousException())
 
     def _do_fail_retry(self, event):
         """
@@ -312,7 +320,7 @@ def get_jession(arg_header):
         
 def _createClientProof(salted_password, auth_msg, algorithm):
     client_key          = hmac.new( unhexlify( salted_password ), "Client Key".encode('UTF-8'), algorithm).hexdigest()
-    stored_key          = scram._hash_sha256( unhexlify(client_key) )
+    stored_key          = scram._hash_sha256( unhexlify(client_key), algorithm )
     client_signature    = hmac.new( unhexlify( stored_key ) , auth_msg.encode() , algorithm ).hexdigest()
     client_proof        = scram._xor (client_key, client_signature)
-    return b2a_base64(unhexlify(client_proof)).decode()
+    return b2a_base64(unhexlify(client_proof)).decode('utf-8')
