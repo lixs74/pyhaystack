@@ -22,6 +22,7 @@ class SyncHttpClient(HTTPClient):
             headers, cookies, auth, timeout, proxies,
             tls_verify, tls_cert, accept_status):
 
+        print('_sync request')
         if auth is not None:
             if isinstance(auth, BasicAuthenticationCredentials):
                 auth = requests.auth.HTTPBasicAuth(

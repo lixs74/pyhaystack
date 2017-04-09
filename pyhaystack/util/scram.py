@@ -9,6 +9,9 @@ import os
 def get_nonce():
     return b2a_hex(os.urandom(32)).decode()
 
+def get_nonce_16():
+    return urlsafe_b64encode( os.urandom(16) ).decode()
+
 def _hash_sha256(client_key, algorithm):
     hashFunc = algorithm()
     hashFunc.update(client_key)
