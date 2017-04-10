@@ -154,14 +154,15 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
     def _do_second_msg(self, event):
         print('do_second_msg')
         msg = 'action=sendClientFirstMessage&clientFirstMessage=n,,%s' % self.client_first_msg
-        self._session._client._session.headers.update({'Cookie':'niagara_userid=%s' % (self._session._username)})
-        
+        #self._session._client._session.headers.update({'Cookie':'niagara_userid=%s' % (self._session._username)})
+        cookies = dict(niagara_userid = self._session._username)
         try:
             self._session._post('%s/j_security_check' % (self._login_uri),
                     body=msg.encode('utf-8'),
                     callback=self._on_second_msg,
                     headers={"Content-Type": "application/x-niagara-login-support"},
                     #         "Cookie": 'niagara_userid=%s' % (self._session._username)},
+                    cookies=cookies,
                     exclude_cookies=True, api=False)
         except Exception as e:
             self._state_machine.exception(result=AsynchronousException())
@@ -221,25 +222,25 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
         client_proof = _createClientProof(self.salted_password, self.auth_msg, self._algorithm)
         client_final_message = client_final_without_proof + ",p=" + client_proof
         final_msg = 'action=sendClientFinalMessage&clientFinalMessage=%s' % (client_final_message)
-        self._session._client._session.headers.update({'Cookie': 'niagara_userid=%s,JSESSIONID=%s' % (self._session._username, self.jsession)})
+        #self._session._client._session.headers.update({'Cookie': 'niagara_userid=%s,JSESSIONID=%s' % (self._session._username, self.jsession)})
         print('Final Msg : ', final_msg)
         print('Session headers : ', self._session._client._session.headers)
-
+        cookies = dict(niagara_userid = self._session._username,
+                       JSESSIONID = self.jsession)
         try:
             # Post
             self._session._post('%s/j_security_check' % self._login_uri,
                     body=final_msg.encode("utf-8"),
                     callback=self._on_authenticated,
                     headers={"Content-Type": "application/x-niagara-login-support"},
-                    #cookies={'JSESSIONID':self.jsession},
-                    #cookies=cookie,
+                    cookies=cookies,
                     exclude_cookies=True,
                     api=False)
         except:
             self._state_machine.exception(result=AsynchronousException())
 
     def _on_authenticated(self, response):
-        print('on_authenticated', response)
+        print('on_authenticated', response.headers)
         try:
             response.reraise() # ← AsynchronousException class
         except HTTPStatusError as e:
@@ -268,6 +269,7 @@ class Niagara4ScramAuthenticateOperation(state.HaystackOperation):
 #                    raise Exception("Server returned an invalid nonce.")
 
 #                self._state_machine.do_server_token()
+            #print(self._session._client._session.get('%s/haystack/about' % self._login_uri))
             self._state_machine.login_done(result={'header': response.headers,
                                                    'cookies': response.cookies})
 
